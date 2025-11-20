@@ -2,7 +2,7 @@ import streamlit as st
 import paho.mqtt.client as mqtt
 import json
 
-BROKER = "broker.emqx.io"
+BROKER = "broker.hivemq.com"
 TOPIC_CONTROL = "smarteco/control"
 
 client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION1)
