@@ -5,38 +5,25 @@ from streamlit_bokeh_events import streamlit_bokeh_events
 import paho.mqtt.client as paho
 import json
 
-st.title("🎤 Control por Voz - SmartEcoHome")
-
 broker = "broker.mqttdashboard.com"
 port = 1883
 
-client = paho.Client("SmartEcoHome_Voz")
+client = paho.Client(client_id="SmartEco_Voz", callback_api_version=paho.CallbackAPIVersion.VERSION1)
+client.connect(broker, port)
 
-st.write("""
-Pulsa el botón y di comandos como:
+st.title("Control por Voz – SmartEco")
 
-- encender luz  
-- apagar luz  
-- encender ventilador  
-- apagar ventilador  
-- abrir puerta  
-- cerrar puerta
-""")
+st.write("Da clic y habla (ej: 'encender luz', 'apagar ventilador', 'abrir puerta 120')")
 
-# Botón de voz
-stt_button = Button(label="🎙️ Hablar", width=200)
+stt_button = Button(label=" 🎤 Hablar ", width=200)
 
 stt_button.js_on_event("button_click", CustomJS(code="""
     var recognition = new webkitSpeechRecognition();
-    recognition.continuous = false;
-    recognition.interimResults = false;
     recognition.lang = "es-ES";
-
     recognition.onresult = function (e) {
         var value = e.results[0][0].transcript;
         document.dispatchEvent(new CustomEvent("GET_TEXT", {detail: value}));
     }
-
     recognition.start();
 """))
 
@@ -44,37 +31,35 @@ result = streamlit_bokeh_events(
     stt_button,
     events="GET_TEXT",
     key="voz",
+    refresh_on_update=False,
     override_height=75
 )
 
+def interpretar(cmd):
+    cmd = cmd.lower()
+
+    if "encender luz" in cmd: return ("luz_on", 0)
+    if "apagar luz" in cmd: return ("luz_off", 0)
+    if "encender ventilador" in cmd: return ("vent_on", 0)
+    if "apagar ventilador" in cmd: return ("vent_off", 0)
+
+    if "abrir puerta" in cmd or "cerrar puerta" in cmd:
+        import re
+        match = re.search(r'\d+', cmd)
+        pos = int(match.group()) if match else 90
+        return ("puerta", pos)
+
+    return (None, None)
+
 if result and "GET_TEXT" in result:
-    texto = result["GET_TEXT"].lower()
-    st.success(f"🔊 Dijiste: **{texto}**")
+    texto = result["GET_TEXT"]
+    st.write(f"🗣 Dijiste: **{texto}**")
 
-    client.connect(broker, port)
+    action, value = interpretar(texto)
 
-    if "encender luz" in texto:
-        msg = {"action": "luz_on"}
-
-    elif "apagar luz" in texto:
-        msg = {"action": "luz_off"}
-
-    elif "encender ventilador" in texto:
-        msg = {"action": "vent_on"}
-
-    elif "apagar ventilador" in texto:
-        msg = {"action": "vent_off"}
-
-    elif "abrir puerta" in texto:
-        msg = {"action": "puerta", "value": 90}
-
-    elif "cerrar puerta" in texto:
-        msg = {"action": "puerta", "value": 0}
-
+    if action:
+        msg = json.dumps({"action": action, "value": value})
+        client.publish("SmartEcoHome/voz_ctr", msg)
+        st.success("Comando enviado")
     else:
-        st.error("Comando no reconocido")
-        msg = None
-
-    if msg:
-        client.publish("smarteco/acciones", json.dumps(msg))
-        st.success("📡 Comando enviado al ESP32")
+        st.error("No entendí el comando 😢")
