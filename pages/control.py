@@ -1,40 +1,50 @@
 import streamlit as st
-import paho.mqtt.client as paho
 import json
+import paho.mqtt.client as paho
+
+st.title("SmartEcoHome – Control Manual")
 
 broker = "broker.mqttdashboard.com"
 port = 1883
 
-# MQTT compatible con Streamlit Cloud
-client = paho.Client(client_id="SmartEco_Control", callback_api_version=paho.CallbackAPIVersion.VERSION1)
+if "estado" not in st.session_state:
+    st.session_state.estado = "Sin datos"
 
-# ----------- CALLBACKS -----------
-def on_connect(client, userdata, flags, rc, properties=None):
-    client.subscribe("SmartEcoHome/sensores")
+if "sensores" not in st.session_state:
+    st.session_state.sensores = {}
+
+def on_connect(client, userdata, flags, rc):
+    client.subscribe("smarteco/sensores")
+    client.subscribe("smarteco/estado")
 
 def on_message(client, userdata, msg):
+    topic = msg.topic
     data = json.loads(msg.payload.decode())
-    st.session_state.sensores = data
+
+    if topic == "smarteco/sensores":
+        st.session_state.sensores = data
+    elif topic == "smarteco/estado":
+        st.session_state.estado = f"{data['tipo']}: {data['detalle']}"
+
+client = paho.Client(client_id="SmartEco_Control",
+                     callback_api_version=paho.CallbackAPIVersion.VERSION1)
 
 client.on_connect = on_connect
 client.on_message = on_message
 client.connect(broker, port)
+client.loop_start()
 
-# ----------- UI -----------
-st.title("Control Manual SmartEco")
+st.subheader("Estado del sistema")
+st.write(st.session_state.estado)
 
-# Mostrar sensores
-if "sensores" in st.session_state:
+st.subheader("Sensores")
+if st.session_state.sensores:
     s = st.session_state.sensores
-    st.metric("Temperatura", f"{s['temp']} °C")
-    st.metric("Humedad", f"{s['hum']} %")
-    st.metric("Luz", s["luz"])
-    st.metric("Gas", s["gas"])
+    st.json(s)
 
-# ----------- Controles -----------
 def enviar(action, value=0):
     msg = json.dumps({"action": action, "value": value})
-    client.publish("SmartEcoHome/control", msg)
+    client.publish("smarteco/control", msg)
 
 col1, col2 = st.columns(2)
 
@@ -45,13 +55,11 @@ with col1:
         enviar("luz_off")
 
 with col2:
-    if st.button("Ventilador ON"):
+    if st.button("Encender Ventilador"):
         enviar("vent_on")
-    if st.button("Ventilador OFF"):
+    if st.button("Apagar Ventilador"):
         enviar("vent_off")
 
-pos = st.slider("Abrir/Cerrar puerta", 0, 180, 90)
-enviar("puerta", pos)
-
-client.loop_start()
-
+pos = st.slider("Ángulo de la Puerta", 0, 180, 90)
+if st.button("Mover Puerta"):
+    enviar("puerta", pos)
