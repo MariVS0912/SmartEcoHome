@@ -81,6 +81,9 @@ if st.button("🎙️ Iniciar reconocimiento de voz"):
 # -----------------------------
 # PROCESAMIENTO DE COMANDO
 # -----------------------------
+# -----------------------------
+# PROCESAMIENTO DE COMANDO
+# -----------------------------
 if submitted and text:
     comando = text.lower()
     st.success(f"Comando detectado: {comando}")
@@ -106,6 +109,5 @@ if submitted and text:
     else:
         st.error("❌ No se reconoció un comando válido.")
 
-    # Limpia el texto usando el callback seguro
-    clear_voice_text()
-
+    # Reinicia la app para limpiar el text_input sin violar reglas de Streamlit
+    st.experimental_rerun()
