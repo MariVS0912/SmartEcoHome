@@ -17,9 +17,13 @@ st.write("Haz clic en el botón y permite acceso al micrófono.")
 if "voice_text" not in st.session_state:
     st.session_state.voice_text = ""
 
+# Callback seguro para limpiar el texto
+def clear_voice_text():
+    st.session_state["voice_text"] = ""
+
 
 # -----------------------------
-# SCRIPT DE VOZ
+# SCRIPT DE RECONOCIMIENTO DE VOZ
 # -----------------------------
 voice_script = """
 <script>
@@ -53,7 +57,7 @@ function startRecognition(){
 st.components.v1.html(voice_script, height=0)
 
 # -----------------------------
-# FORMULARIO DE ENTRADA
+# FORMULARIO STREAMLIT
 # -----------------------------
 with st.form("formulario_voz"):
     text = st.text_input(
@@ -75,7 +79,7 @@ if st.button("🎙️ Iniciar reconocimiento de voz"):
     st.components.v1.html("<script>startRecognition()</script>", height=0)
 
 # -----------------------------
-# CUANDO SE RECIBE UN COMANDO
+# PROCESAMIENTO DE COMANDO
 # -----------------------------
 if submitted and text:
     comando = text.lower()
@@ -102,5 +106,6 @@ if submitted and text:
     else:
         st.error("❌ No se reconoció un comando válido.")
 
-    # Limpia el texto para el siguiente reconocimiento
-    st.session_state.voice_text = ""
+    # Limpia el texto usando el callback seguro
+    clear_voice_text()
+
