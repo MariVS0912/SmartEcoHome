@@ -1,67 +1,65 @@
 import streamlit as st
-from bokeh.models.widgets import Button
-from bokeh.models import CustomJS
-from streamlit_bokeh_events import streamlit_bokeh_events
-import paho.mqtt.client as paho
+import paho.mqtt.client as mqtt
 import json
-import re
 
-st.title("SmartEcoHome – Control por Voz")
+BROKER = "broker.emqx.io"
+TOPIC_CONTROL = "smarteco/control"
 
-broker = "broker.mqttdashboard.com"
-port = 1883
+client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION1)
+client.connect(BROKER, 1883, 60)
 
-client = paho.Client(client_id="SmartEco_Voz",
-                     callback_api_version=paho.CallbackAPIVersion.VERSION1)
-client.connect(broker, port)
+st.title("🎤 Control por Voz – SmartEcoHome")
 
-st.write("Pulsa y da una instrución como:")
-st.write("• encender luz")
-st.write("• apagar ventilador")
-st.write("• abrir puerta 120")
+st.write("Haz clic en el botón y permite acceso al micrófono.")
 
-btn = Button(label="🎤 Hablar", width=200)
-
-btn.js_on_event("button_click", CustomJS(code="""
-    var recognition = new webkitSpeechRecognition();
+# ----------- JAVASCRIPT PARA CAPTURAR VOZ -----------
+voice_script = """
+<script>
+function startRecognition(){
+    const recognition = new(window.SpeechRecognition || window.webkitSpeechRecognition)();
     recognition.lang = "es-ES";
-    recognition.onresult = function(e){
-        var text = e.results[0][0].transcript;
-        document.dispatchEvent(new CustomEvent("GET_TEXT", {detail: text}));
+    recognition.continuous = false;
+    recognition.interimResults = false;
+
+    recognition.onresult = function(event){
+        const text = event.results[0][0].transcript;
+        document.getElementById("voice_text").value = text;
+        document.getElementById("voice_form").dispatchEvent(new Event("submit"));
     }
+
     recognition.start();
-"""))
+}
+</script>
+"""
 
-result = streamlit_bokeh_events(
-    btn,
-    events="GET_TEXT",
-    key="voz",
-    refresh_on_update=False
-)
+st.components.v1.html(voice_script, height=0)
 
-def interpretar(texto):
-    t = texto.lower()
+# ----------- FORMULARIO OCULTO PARA RECIBIR TEXTO -----------
+with st.form("voice_form", clear_on_submit=True):
+    text = st.text_input("", key="voice_text")
+    submitted = st.form_submit_button("")
 
-    if "encender luz" in t: return ("luz_on", 0)
-    if "apagar luz" in t: return ("luz_off", 0)
-    if "encender ventilador" in t: return ("vent_on", 0)
-    if "apagar ventilador" in t: return ("vent_off", 0)
+if st.button("🎙️ Iniciar reconocimiento de voz"):
+    st.components.v1.html("<script>startRecognition()</script>", height=0)
 
-    if "puerta" in t:
-        m = re.search(r"\d+", t)
-        ang = int(m.group()) if m else 90
-        return ("puerta", ang)
+if submitted and text:
+    st.success(f"Comando detectado: {text}")
 
-    return (None, None)
+    # -------- MAPEO DE COMANDOS --------
+    text_l = text.lower()
 
-if result and "GET_TEXT" in result:
-    txt = result["GET_TEXT"]
-    st.write(f"🗣 Dijiste: {txt}")
-
-    action, value = interpretar(txt)
-    if action:
-        msg = json.dumps({"action": action, "value": value})
-        client.publish("smarteco/voz", msg)
-        st.success("Comando enviado")
+    if "encender luz" in text_l:
+        client.publish(TOPIC_CONTROL, json.dumps({"action": "luz_on"}))
+    elif "apagar luz" in text_l:
+        client.publish(TOPIC_CONTROL, json.dumps({"action": "luz_off"}))
+    elif "encender ventilador" in text_l:
+        client.publish(TOPIC_CONTROL, json.dumps({"action": "vent_on"}))
+    elif "apagar ventilador" in text_l:
+        client.publish(TOPIC_CONTROL, json.dumps({"action": "vent_off"}))
+    elif "abrir puerta" in text_l:
+        client.publish(TOPIC_CONTROL, json.dumps({"action": "puerta", "value": 90}))
+    elif "cerrar puerta" in text_l:
+        client.publish(TOPIC_CONTROL, json.dumps({"action": "puerta", "value": 0}))
     else:
+        st.error("No reconocí un comando válido.")
         st.error("No entendí la instrucción")
