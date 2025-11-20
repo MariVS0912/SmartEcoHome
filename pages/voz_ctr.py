@@ -2,33 +2,24 @@ import streamlit as st
 import paho.mqtt.client as mqtt
 import json
 
-# -----------------------------
-# CONFIGURACIÓN MQTT
-# -----------------------------
 BROKER = "broker.hivemq.com"
 TOPIC_CONTROL = "smarteco/control"
 
 client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION1)
 client.connect(BROKER, 1883, 60)
 
-# -----------------------------
-# CONFIGURACIÓN DE LA PÁGINA
-# -----------------------------
 st.title("🎤 Control por Voz – SmartEcoHome")
-st.write("Haz clic en el botón y permite acceso al micrófono para comenzar.")
+st.write("Haz clic en el botón y permite acceso al micrófono.")
 
 # -----------------------------
-# INICIALIZACIÓN DE SESSION_STATE
+# VARIABLES DE ESTADO
 # -----------------------------
 if "voice_text" not in st.session_state:
     st.session_state.voice_text = ""
 
-if "voice_trigger" not in st.session_state:
-    st.session_state.voice_trigger = False
-
 
 # -----------------------------
-# SCRIPT DE JAVASCRIPT PARA VOZ
+# SCRIPT DE VOZ
 # -----------------------------
 voice_script = """
 <script>
@@ -40,12 +31,18 @@ function startRecognition(){
 
     recognition.onresult = function(event){
         const text = event.results[0][0].transcript;
-        const input = document.getElementById("voice_text_input");
-        input.value = text;
-        input.dispatchEvent(new Event("input", { bubbles: true }));
-        
-        const submitBtn = document.getElementById("voice_submit_btn");
-        submitBtn.click();
+
+        // enviar texto al streamlit
+        const streamlitInput = window.parent.document.querySelector('input[data-voice-input]');
+        if(streamlitInput){
+            streamlitInput.value = text;
+            streamlitInput.dispatchEvent(new Event("input", { bubbles: true }));
+        }
+
+        const streamlitSubmit = window.parent.document.querySelector('button[data-voice-submit]');
+        if(streamlitSubmit){
+            streamlitSubmit.click();
+        }
     }
 
     recognition.start();
@@ -55,14 +52,55 @@ function startRecognition(){
 
 st.components.v1.html(voice_script, height=0)
 
+# -----------------------------
+# FORMULARIO DE ENTRADA
+# -----------------------------
+with st.form("formulario_voz"):
+    text = st.text_input(
+        "Comando detectado:",
+        key="voice_text",
+        label_visibility="collapsed",
+        help="(Este campo se llena automáticamente)",
+        kwargs={"data-voice-input": "true"}  # atributo HTML permitido
+    )
+    submitted = st.form_submit_button(
+        "Procesar comando",
+        kwargs={"data-voice-submit": "true"}  # atributo HTML permitido
+    )
 
 # -----------------------------
-# FORMULARIO QUE RECIBE LA VOZ
+# BOTÓN PARA ACTIVAR MICRÓFONO
 # -----------------------------
-with st.form("voice_form"):
-    text = st.text_input("", key="voice_text", id="voice_text_input")
-    submitted = st.form_submit_button("Procesar comando", type="primary", disabled=True, id="voice_submit_btn")
-
+if st.button("🎙️ Iniciar reconocimiento de voz"):
+    st.components.v1.html("<script>startRecognition()</script>", height=0)
 
 # -----------------------------
-#
+# CUANDO SE RECIBE UN COMANDO
+# -----------------------------
+if submitted and text:
+    comando = text.lower()
+    st.success(f"Comando detectado: {comando}")
+
+    if "encender luz" in comando:
+        client.publish(TOPIC_CONTROL, json.dumps({"action": "luz_on"}))
+        st.info("💡 Luz encendida")
+    elif "apagar luz" in comando:
+        client.publish(TOPIC_CONTROL, json.dumps({"action": "luz_off"}))
+        st.info("💡 Luz apagada")
+    elif "encender ventilador" in comando:
+        client.publish(TOPIC_CONTROL, json.dumps({"action": "vent_on"}))
+        st.info("🌀 Ventilador encendido")
+    elif "apagar ventilador" in comando:
+        client.publish(TOPIC_CONTROL, json.dumps({"action": "vent_off"}))
+        st.info("🌀 Ventilador apagado")
+    elif "abrir puerta" in comando:
+        client.publish(TOPIC_CONTROL, json.dumps({"action": "puerta", "value": 90}))
+        st.info("🚪 Puerta abierta")
+    elif "cerrar puerta" in comando:
+        client.publish(TOPIC_CONTROL, json.dumps({"action": "puerta", "value": 0}))
+        st.info("🚪 Puerta cerrada")
+    else:
+        st.error("❌ No se reconoció un comando válido.")
+
+    # Limpia el texto para el siguiente reconocimiento
+    st.session_state.voice_text = ""
