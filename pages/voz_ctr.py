@@ -1,70 +1,91 @@
-# pages/voz_ctr.py
 import streamlit as st
 import speech_recognition as sr
-import json
 import paho.mqtt.client as mqtt
+import json
+import time
 
-st.set_page_config(page_title="Voz - SmartEcoHome")
+# Configuración de la página
+st.set_page_config(page_title="Control por Voz - SmartEcoHome", page_icon="🎤")
 
-with st.sidebar:
-    st.subheader("MQTT (Voz)")
-    broker = st.text_input("Broker MQTT", value="broker.mqttdashboard.com", key="b2")
-    port = st.number_input("Puerto", value=1883, min_value=1, max_value=65535, key="p2")
-    action_topic = st.text_input("Tópico acciones", value="smarteco/acciones", key="t2")
-    client_id = st.text_input("Client ID", value="smarteco_streamlit_voice", key="c2")
+st.title("🎤 Control por Voz – SmartEcoHome")
 
-def publish_command(cmd: dict):
+# MQTT CONFIG
+MQTT_BROKER = "broker.mqttdashboard.com"
+MQTT_PORT = 1883
+MQTT_TOPIC = "smarteco/acciones"
+CLIENT_ID = "streamlit_voice"
+
+# Función para enviar comandos MQTT
+def send_mqtt(action, value=None):
     try:
-        client = mqtt.Client(client_id=client_id)
-        client.connect(broker, int(port), 60)
-        client.publish(action_topic, json.dumps(cmd))
+        client = mqtt.Client(client_id=CLIENT_ID)
+        client.connect(MQTT_BROKER, MQTT_PORT, 60)
+
+        payload = {"action": action}
+        if value is not None:
+            payload["value"] = value
+
+        client.publish(MQTT_TOPIC, json.dumps(payload))
         client.disconnect()
-        return True, None
+        return True
     except Exception as e:
         return False, str(e)
 
-st.title("Control por Voz (sube un archivo)")
+# Interpretador de la orden hablada
+def interpretar_comando(texto):
+    texto = texto.lower()
 
+    if "encender luz" in texto or "prender luz" in texto:
+        return ("luz_on", None)
+    if "apagar luz" in texto:
+        return ("luz_off", None)
+
+    if "encender ventilación" in texto or "encender ventilador" in texto:
+        return ("vent_on", None)
+    if "apagar ventilación" in texto or "apagar ventilador" in texto:
+        return ("vent_off", None)
+
+    if "abrir puerta" in texto or "abrir escotilla" in texto:
+        return ("puerta", 180)
+    if "cerrar puerta" in texto or "cerrar escotilla" in texto:
+        return ("puerta", 0)
+
+    return (None, None)
+
+st.write("Pulsa el botón y da una orden como:")
 st.markdown("""
-Por limitaciones del navegador, la app solicita que subas un archivo de audio (.wav o .mp3) con el comando de voz.
-El audio se transcribe localmente con `speech_recognition`.
+- **'Encender luz'**  
+- **'Apagar ventilación'**  
+- **'Abrir puerta'**  
+- **'Cerrar escotilla'**  
 """)
 
-audio_file = st.file_uploader("Sube el archivo de audio (wav/mp3)", type=["wav", "mp3", "m4a", "ogg"])
-if audio_file:
-    st.audio(audio_file)
-    recognizer = sr.Recognizer()
+# GRABACIÓN DE VOZ
+if st.button("🎤 Escuchar"):
+    r = sr.Recognizer()
+
+    with sr.Microphone() as source:
+        st.info("🎙️ Escuchando... habla ahora")
+        audio = r.listen(source)
+
     try:
-        with sr.AudioFile(audio_file) as source:
-            audio = recognizer.record(source)
-        text = recognizer.recognize_google(audio, language="es-ES")
-        st.success("Transcripción:")
-        st.write(text)
+        st.info("🔍 Procesando...")
+        text = r.recognize_google(audio, language="es-ES")
+        st.success(f"🗣️ Dijiste: **{text}**")
 
-        # Mapeo simple de frases a comandos
-        text_lower = text.lower()
-        cmd = None
-        if "luz" in text_lower and ("encend" in text_lower or "prend" in text_lower):
-            cmd = {"action": "luz_on", "value": 1}
-        elif "luz" in text_lower and ("apagar" in text_lower or "apag" in text_lower):
-            cmd = {"action": "luz_off", "value": 0}
-        elif "ventil" in text_lower or "venti" in text_lower:
-            if "encend" in text_lower or "prend" in text_lower:
-                cmd = {"action": "vent_on", "value": 1}
-            else:
-                cmd = {"action": "vent_off", "value": 0}
-        elif "abrir" in text_lower or "abre" in text_lower:
-            cmd = {"action": "puerta", "value": 180}
-        elif "cerrar" in text_lower or "cierra" in text_lower:
-            cmd = {"action": "puerta", "value": 90}
+        action, value = interpretar_comando(text)
+
+        if action is None:
+            st.error("❌ No reconocí una orden válida.")
         else:
-            st.info("No se reconoció una acción automática. Puedes enviar el texto como JSON manualmente.")
+            ok = send_mqtt(action, value)
+            if ok:
+                st.success(f"📡 Enviado → acción: `{action}`, valor: `{value}`")
+            else:
+                st.error("❌ Error enviando comando MQTT.")
 
-        if cmd:
-            if st.button("Enviar comando detectado"):
-                ok, err = publish_command(cmd)
-                st.success("Comando enviado") if ok else st.error(f"Error: {err}")
     except sr.UnknownValueError:
-        st.error("No se pudo transcribir el audio")
+        st.error("No entendí lo que dijiste 😔")
     except Exception as e:
-        st.error(f"Error al procesar audio: {e}")
+        st.error(f"Ocurrió un error: {e}")
+
