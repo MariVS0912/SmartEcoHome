@@ -1,82 +1,87 @@
 import streamlit as st
 import json
-import paho.mqtt.client as paho
+import paho.mqtt.client as mqtt
 
-st.title("SmartEcoHome – Control Manual")
+# ---------------------------------------------
+# CONFIG MQTT
+# ---------------------------------------------
+BROKER = "broker.emqx.io"
+PORT = 1883
+TOPIC_CONTROL = "smarteco/control"
+TOPIC_ESTADO = "smarteco/estado"
 
-broker = "broker.mqttdashboard.com"
-port = 1883
+# paho-mqtt v2 requiere el parámetro callback_api_version
+client = mqtt.Client(client_id="SmartEcoHome_ControlWeb", callback_api_version=5)
 
-if "estado" not in st.session_state:
-    st.session_state.estado = "Sin datos"
+ultimo_estado = "Esperando datos..."
 
-if "sensores" not in st.session_state:
-    st.session_state.sensores = {}
+# ---------------------------------------------
+# CALLBACKS MQTT
+# ---------------------------------------------
+def on_connect(client, userdata, flags, reason_code, properties=None):
+    client.subscribe(TOPIC_ESTADO)
 
-def on_connect(client, userdata, flags, rc):
-    client.subscribe("smarteco/sensores")
-    client.subscribe("smarteco/estado")
+def on_message(client, userdata, message):
+    global ultimo_estado
+    try:
+        data = json.loads(message.payload.decode())
+        tipo = data.get("tipo", "")
+        detalle = data.get("detalle", "")
+        ultimo_estado = f"{tipo}: {detalle}"
+    except:
+        ultimo_estado = "Mensaje inválido recibido"
 
-def on_message(client, userdata, msg):
-    topic = msg.topic
-    data = json.loads(msg.payload.decode())
-
-    if topic == "smarteco/sensores":
-        st.session_state.sensores = data
-    elif topic == "smarteco/estado":
-        st.session_state.estado = f"{data['tipo']}: {data['detalle']}"
-
-client = paho.Client(client_id="SmartEco_Control",
-                     callback_api_version=paho.CallbackAPIVersion.VERSION1)
 
 client.on_connect = on_connect
 client.on_message = on_message
-client.connect(broker, port)
+
+client.connect(BROKER, PORT)
 client.loop_start()
 
-st.subheader("Estado del sistema")
-st.write(st.session_state.estado)
+# ---------------------------------------------
+# FUNCIÓN PARA ENVIAR COMANDOS MQTT
+# ---------------------------------------------
+def enviar_comando(action, value=0):
+    payload = json.dumps({"action": action, "value": value})
+    client.publish(TOPIC_CONTROL, payload)
 
-st.subheader("Sensores")
-if st.session_state.sensores:
-    s = st.session_state.sensores
-    st.json(s)
 
-def enviar(action, value=0):
-    msg = json.dumps({"action": action, "value": value})
-    client.publish("smarteco/control", msg)
+# ---------------------------------------------
+# UI STREAMLIT
+# ---------------------------------------------
+st.title("SmartEcoHome – Control por Botones")
+st.subheader("Panel de control físico + sincronizado con ESP32")
+
+st.markdown("### Estado del sistema:")
+st.info(ultimo_estado)
+
+st.markdown("---")
+st.markdown("## 🔆 Control de Luz")
 
 col1, col2 = st.columns(2)
+if col1.button("Encender Luz"):
+    enviar_comando("luz_on")
+if col2.button("Apagar Luz"):
+    enviar_comando("luz_off")
 
-with col1:
-    if st.button("Encender Luz"):
-        enviar("luz_on")
-    if st.button("Apagar Luz"):
-        enviar("luz_off")
+st.markdown("---")
+st.markdown("## 🌬️ Control de Ventilador")
 
-with col2:
-    if st.button("Encender Ventilador"):
-        enviar("vent_on")
-    if st.button("Apagar Ventilador"):
-        enviar("vent_off")
+col3, col4 = st.columns(2)
+if col3.button("Encender Ventilador"):
+    enviar_comando("vent_on")
+if col4.button("Apagar Ventilador"):
+    enviar_comando("vent_off")
 
-pos = st.slider("Ángulo de la Puerta", 0, 180, 90)
-if st.button("Mover Puerta"):
-    enviar("puerta", pos)
+st.markdown("---")
+st.markdown("## 🚪 Control de Puerta (Servo)")
 
-def on_connect(client, userdata, flags, rc):
-    client.subscribe("smarteco/sensores")
-    client.subscribe("smarteco/estado")
-    
-def on_message(client, userdata, msg):
-    topic = msg.topic
-    data = json.loads(msg.payload.decode())
+col5, col6 = st.columns(2)
+if col5.button("Abrir Puerta"):
+    enviar_comando("puerta", 90)
+if col6.button("Cerrar Puerta"):
+    enviar_comando("puerta", 0)
 
-    if topic == "smarteco/sensores":
-        st.session_state.sensores = data
-
-    if topic == "smarteco/estado":
-        tipo = data["tipo"]
-        detalle = data["detalle"]
-        st.session_state.estado = f"{tipo}: {detalle}"
+st.markdown("---")
+st.success("Conectado al broker MQTT y esperando eventos…")
 
